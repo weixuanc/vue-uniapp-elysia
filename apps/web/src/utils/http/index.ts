@@ -38,12 +38,14 @@ interface ExtendedAxiosRequestConfig extends AxiosRequestConfig {
   showSuccessMessage?: boolean
 }
 
-const { VITE_API_URL, VITE_WITH_CREDENTIALS } = import.meta.env
+const { VITE_WITH_CREDENTIALS } = import.meta.env
 
 /** Axios实例 */
 const axiosInstance = axios.create({
   timeout: REQUEST_TIMEOUT,
-  baseURL: VITE_API_URL,
+  // 业务前缀统一在 api/** 的 url 上声明（保持 /api/... 完整路径）
+  // 这里留空，避免与 url 中的 /api 拼接成 /api/api/...
+  baseURL: '',
   withCredentials: VITE_WITH_CREDENTIALS === 'true',
   validateStatus: (status) => status >= 200 && status < 300,
   transformResponse: [
