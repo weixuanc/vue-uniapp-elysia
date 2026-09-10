@@ -1,0 +1,25 @@
+{
+  "name": "vue-uniapp-elysia",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev:server": "bun run --filter server dev",
+    "dev:web": "bun run --filter web dev",
+    "dev:uniapp": "bun run --filter uniapp dev",
+    "build:server": "bun run --filter server build",
+    "build:web": "bun run --filter web build",
+    "build:uniapp": "bun run --filter uniapp build"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.20.2"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  }
+}
