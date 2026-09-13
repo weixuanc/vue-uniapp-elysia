@@ -24,7 +24,7 @@ Skip this skill for `apps/gateway`, `apps/web`, `apps/uniapp`, and any non-Elysi
 - Config: Bun auto-loads `.env` — never add `dotenv`.
 - Bun APIs only for low-level: `Bun.serve`, `Bun.redis`, `Bun.sql`, `bun:sqlite`, `Bun.file`. No `express`, `ioredis`, `pg`, `ws`, `better-sqlite3`.
 - TypeScript: `tsconfig.json` enables `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax`. Use `import type` for type-only imports.
-- HTTP stack: Elysia with feature-based modules. Validation via TypeBox (`drizzle-typebox` for DB-driven models).
+- HTTP stack: Elysia with feature-based modules. Validation via TypeBox (`drizzle-typebox` for DB-driven models). OpenAPI docs via `@elysiajs/swagger`, mounted first on the root app — see §7.
 - Persistence: Drizzle ORM (Postgres in prod, swap to `bun:sqlite` if local). Single source of truth: `apps/server/src/database/schema.ts`.
 - Jobs: BullMQ on a shared `Bun.redis` / `ioredis` client. Workers MUST run as a separate process entry (`apps/server/src/queue/worker.ts`), never inline the HTTP server.
 - No comments in code unless the user explicitly asks (matches `AGENTS.md` / opencode defaults).
@@ -59,12 +59,13 @@ The skill MUST place files exactly under these paths. Never invent alternative r
 
 ### 1. Controller (`modules/<feature>/index.ts`)
 
-- Export a named `const <feature>Controller = new Elysia({ prefix: '/<feature>' })`.
+- Export a named `const <feature> = new Elysia({ name: '<feature>', prefix: '/<feature>' })`. NEVER suffix with `Controller` — the file lives under `modules/<feature>/`, so the bare feature name is enough.
+- EVERY `new Elysia(...)` in the codebase MUST carry a `name` property — root app (`'app'`), every module (`'<feature>'`), and every nested sub-plugin (e.g. `'<feature>.service'`). This is required for plugin deduplication and tracing.
 - TypeBox is imported as `import { t } from 'elysia'`.
 - Validation: prefer `body: <feature>Model.create` over inline `t.Object({...})`.
 - Pass ONLY specific data into the service: `({ body }) => FeatureService.create(body)` — never pass the whole context.
-- For request-scoped state (auth, db transaction), use `new Elysia({ name: '<feature>.service', ... })` so the plugin is deduplicated.
-- Mount into the entry via `.use(featureController)`; do not start a new listener here.
+- For request-scoped state (auth, db transaction), use a nested `new Elysia({ name: '<feature>.service', ... })` so the plugin is deduplicated and scoped state is isolated.
+- Mount into the entry via `.use(<feature>)`; do not start a new listener here.
 
 ### 2. Service (`modules/<feature>/service.ts`)
 
@@ -108,6 +109,30 @@ export type UserEntity = typeof userModel.entity.static
 
 If the schema cannot come from Drizzle, fall back to `t.Object({...})` and still export a `static` type alias.
 
+**Field metadata (mandatory for OpenAPI):** EVERY leaf field inside `t.Object(...)` MUST carry BOTH `title` (short Chinese label) and `description` (longer Chinese explanation). This powers the Swagger UI and must be human-readable in Chinese. Apply this to:
+- hand-written TypeBox models,
+- every override inside `createInsertSchema(...)`,
+- and any nested `t.Optional(t.Union([...]))` — put `title` / `description` on BOTH the inner type and the wrapping union.
+
+Example:
+
+```ts
+email: t.String({
+  title: '邮箱',
+  description: '用户邮箱地址,用于登录与通知',
+  format: 'email'
+}),
+status: t.Optional(
+  t.Union(
+    [
+      t.String({ title: '状态值', description: '启停状态枚举' }),
+      t.Null()
+    ],
+    { title: '状态', description: '启停状态,允许为空' }
+  )
+)
+```
+
 ### 4. Database schema (`database/schema.ts`)
 
 - One `pgTable` (or sqlite equivalent) per entity; re-export everything as `table` and export the `Table` type.
@@ -130,15 +155,37 @@ If the schema cannot come from Drizzle, fall back to `t.Object({...})` and still
 
 ### 7. Entry point (`index.ts`)
 
-- Compose all controllers via `.use(featureController)`.
-- Listen with `app.listen(config.port)`; print `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`.
+- Mount `@elysiajs/swagger` FIRST on the root app so it can introspect every downstream route. Required config:
+  ```ts
+  import { swagger } from '@elysiajs/swagger'
+  swagger({
+    path: '/swagger',
+    documentation: {
+      info: {
+        title: '<Chinese project title>',
+        version: '<matches package.json version>',
+        description: '<Chinese one-line description>'
+      },
+      tags: [
+        { name: '<feature>', description: '<Chinese tag description>' },
+        ...
+      ]
+    }
+  })
+  ```
+  Keep the `tags` list aligned with the `tags: ['<feature>']` declared on each module's `new Elysia(...)`.
+- Compose all modules via `.use(<feature>)` — import as `import { <feature> } from './modules/<feature>'`, no `Controller` suffix.
+- The root app MUST also have `name: 'app'` on its `new Elysia(...)` constructor.
+- Listen with `app.listen(config.port)`. Startup logs MUST print BOTH:
+  - `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
+  - `📚 OpenAPI docs: http://${app.server?.hostname}:${app.server?.port}/swagger`
 
 ## Workflow when invoked
 
 1. Identify the feature name (kebab-case folder) and the route prefix (kebab-case, plural when natural).
 2. If the feature needs persistence and the table does not exist, add it to `database/schema.ts` first and run `bunx drizzle-kit generate` (or instruct the user to).
 3. Generate the three files under `apps/server/src/modules/<feature>/`.
-4. Wire the controller into `apps/server/src/index.ts` (read it first; never overwrite unrelated code).
+4. Wire the module into `apps/server/src/index.ts` (read it first; never overwrite unrelated code).
 5. If the feature emits jobs, add the producer function and reference it from the service; instruct the user to also wire the worker entry.
 6. List every file you created or modified, with absolute paths and a one-line rationale.
 
@@ -146,6 +193,10 @@ If the schema cannot come from Drizzle, fall back to `t.Object({...})` and still
 
 - [ ] Service never imports `elysia` or `Bun.serve`.
 - [ ] Controller imports service and model only — no DB or Redis.
+- [ ] Every `new Elysia(...)` has a `name` property (root, module, and any nested sub-plugin).
+- [ ] Module exports use the bare feature name (`export const auth = ...`), NEVER `xxxController` suffix.
+- [ ] `@elysiajs/swagger` is mounted first in `apps/server/src/index.ts` with Chinese `info` + `tags`.
+- [ ] Every TypeBox leaf field has both `title` (Chinese) and `description` (Chinese) — including nested `t.Optional(t.Union([...]))`.
 - [ ] `drizzle-typebox` schemas are wrapped via a `_local` const.
 - [ ] New tables added to `database/schema.ts` and re-exported under `table`.
 - [ ] Shared `db` and `redis` clients are reused, never re-created.

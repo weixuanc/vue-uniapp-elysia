@@ -1,13 +1,29 @@
-import jwt from '@elysiajs/jwt'
+import jwt, { type JWTPayloadInput } from '@elysiajs/jwt'
 import { config } from '../config'
 import { unauthorized } from './error'
 
 export interface JwtPayload {
-  sub: number
+  sub: string
   userName: string
   type: 'access' | 'refresh'
   exp?: number
   iat?: number
+}
+
+type ClaimValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | ClaimValue[]
+  | { [key: string]: ClaimValue }
+
+export interface JwtInstance {
+  sign: (
+    signValue: Omit<Record<string, ClaimValue>, 'nbf' | 'exp' | 'iat'> & JWTPayloadInput
+  ) => Promise<string>
+  verify: (token?: string) => Promise<unknown>
 }
 
 export const authJwt = jwt({
@@ -24,9 +40,7 @@ export const extractToken = (authorization: string | null | undefined): string =
 }
 
 export const requireAuth = async (
-  jwtInstance: {
-    verify: (token?: string) => Promise<unknown>
-  },
+  jwtInstance: JwtInstance,
   authorization: string | null | undefined
 ): Promise<JwtPayload> => {
   const token = extractToken(authorization)

@@ -3,6 +3,7 @@ import { db } from '../../config/database'
 import { users } from '../../database/schema'
 import { verifyPassword } from '../../utils/password'
 import { badRequest, unauthorized } from '../../utils/error'
+import type { JwtInstance } from '../../utils/jwt'
 import { config } from '../../config'
 import type { LoginBody } from './model'
 
@@ -12,12 +13,7 @@ export interface LoginResult {
 }
 
 export abstract class AuthService {
-  static async login(
-    body: LoginBody,
-    jwt: {
-      sign: (payload: Record<string, unknown>) => Promise<string>
-    }
-  ): Promise<LoginResult> {
+  static async login(body: LoginBody, jwt: JwtInstance): Promise<LoginResult> {
     if (!body.userName || !body.password) {
       throw badRequest('userName and password are required')
     }
@@ -43,13 +39,13 @@ export abstract class AuthService {
 
     const [token, refreshToken] = await Promise.all([
       jwt.sign({
-        sub: user.id,
+        sub: String(user.id),
         userName: user.userName,
         type: 'access',
         exp: config.jwt.accessExpiresIn
       }),
       jwt.sign({
-        sub: user.id,
+        sub: String(user.id),
         userName: user.userName,
         type: 'refresh',
         exp: config.jwt.refreshExpiresIn

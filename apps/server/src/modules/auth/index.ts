@@ -4,7 +4,8 @@ import { AuthService } from './service'
 import { ok } from '../../utils/response'
 import { authJwt } from '../../utils/jwt'
 
-export const authController = new Elysia({
+export const auth = new Elysia({
+  name: 'auth',
   prefix: '/api/auth',
   tags: ['auth']
 })

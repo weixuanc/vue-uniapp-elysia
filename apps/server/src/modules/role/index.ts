@@ -4,7 +4,8 @@ import { RoleService } from './service'
 import { ok } from '../../utils/response'
 import { authJwt, requireAuth } from '../../utils/jwt'
 
-export const roleController = new Elysia({
+export const role = new Elysia({
+  name: 'role',
   prefix: '/api/role',
   tags: ['role']
 })

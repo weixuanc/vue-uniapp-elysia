@@ -1,15 +1,34 @@
 import cors from '@elysiajs/cors'
+import { swagger } from '@elysiajs/swagger'
 import { Elysia } from 'elysia'
 import { config } from './config'
 import { bootstrap } from './database/bootstrap'
-import { authController } from './modules/auth'
-import { userController } from './modules/user'
-import { roleController } from './modules/role'
-import { menuController } from './modules/menu'
+import { auth } from './modules/auth'
+import { user } from './modules/user'
+import { role } from './modules/role'
+import { menu } from './modules/menu'
 import { HttpError } from './utils/error'
 import { ApiCode, ok } from './utils/response'
 
 const app = new Elysia({ name: 'app' })
+  .use(
+    swagger({
+      path: '/swagger',
+      documentation: {
+        info: {
+          title: '能耗管理系统 API',
+          version: '1.0.50',
+          description: '能耗管理系统后端接口文档'
+        },
+        tags: [
+          { name: 'auth', description: '认证授权接口' },
+          { name: 'user', description: '用户管理接口' },
+          { name: 'role', description: '角色管理接口' },
+          { name: 'menu', description: '菜单管理接口' }
+        ]
+      }
+    })
+  )
   .use(
     cors({
       origin: true,
@@ -37,18 +56,20 @@ const app = new Elysia({ name: 'app' })
     }
     console.error('[Server Error]', error)
     set.status = 200
+    const fallbackMessage =
+      error instanceof Error ? error.message : '服务器内部错误'
     return {
       code: ApiCode.internalServerError,
-      msg: error.message || '服务器内部错误',
+      msg: fallbackMessage,
       data: null
     }
   })
   .get('/', () => ok({ name: 'energy2iot-server', status: 'running' }))
   .get('/health', () => ok({ status: 'ok' }))
-  .use(authController)
-  .use(userController)
-  .use(roleController)
-  .use(menuController)
+  .use(auth)
+  .use(user)
+  .use(role)
+  .use(menu)
 
 const start = async () => {
   try {
@@ -63,6 +84,7 @@ const start = async () => {
   console.log(
     `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
   )
+  console.log(`📚 OpenAPI docs: http://${app.server?.hostname}:${app.server?.port}/swagger`)
 }
 
 start()

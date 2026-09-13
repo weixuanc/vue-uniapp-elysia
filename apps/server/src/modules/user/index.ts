@@ -4,14 +4,15 @@ import { UserService } from './service'
 import { ok } from '../../utils/response'
 import { authJwt, requireAuth } from '../../utils/jwt'
 
-export const userController = new Elysia({
+export const user = new Elysia({
+  name: 'user',
   prefix: '/api/user',
   tags: ['user']
 })
   .use(authJwt)
   .get('/info', async ({ jwt, request }) => {
     const payload = await requireAuth(jwt, request.headers.get('authorization'))
-    const info = await UserService.getInfo(payload.sub)
+    const info = await UserService.getInfo(Number(payload.sub))
     return ok(info)
   })
   .get(
