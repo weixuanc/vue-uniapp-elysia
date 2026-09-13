@@ -27,6 +27,7 @@ Skip this skill for `apps/gateway`, `apps/web`, `apps/uniapp`, and any non-Elysi
 - HTTP stack: Elysia with feature-based modules. Validation via TypeBox (`drizzle-typebox` for DB-driven models). OpenAPI docs via `@elysiajs/swagger`, mounted first on the root app — see §7.
 - Persistence: Drizzle ORM (Postgres in prod, swap to `bun:sqlite` if local). Single source of truth: `apps/server/src/database/schema.ts`.
 - Jobs: BullMQ on a shared `Bun.redis` / `ioredis` client. Workers MUST run as a separate process entry (`apps/server/src/queue/worker.ts`), never inline the HTTP server.
+- Logging: **winston** + **winston-daily-rotate-file** (already installed). Always log via `import { logger } from '../utils/logger'`. NEVER use `console.log` / `console.error` in app code — see §8.
 - No comments in code unless the user explicitly asks (matches `AGENTS.md` / opencode defaults).
 
 ## Required folder layout
@@ -50,7 +51,10 @@ apps/server/src/
 │   ├── worker.ts                     # BullMQ workers, separate process
 │   └── jobs.ts                       # job payload types + queue name constants
 └── utils/
-    └── response.ts                   # ok/fail helpers
+    ├── response.ts                   # ok/fail helpers
+    ├── error.ts                      # HttpError + unauthorized/forbidden/notFound/badRequest
+    ├── jwt.ts                        # JWT helpers (authJwt, requireAuth)
+    └── logger.ts                     # winston + DailyRotateFile, categorized (see §8)
 ```
 
 The skill MUST place files exactly under these paths. Never invent alternative roots.
@@ -177,8 +181,32 @@ status: t.Optional(
 - Compose all modules via `.use(<feature>)` — import as `import { <feature> } from './modules/<feature>'`, no `Controller` suffix.
 - The root app MUST also have `name: 'app'` on its `new Elysia(...)` constructor.
 - Listen with `app.listen(config.port)`. Startup logs MUST print BOTH:
-  - `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-  - `📚 OpenAPI docs: http://${app.server?.hostname}:${app.server?.port}/swagger`
+  - `🦊 Elysia is running at ${host}:${port}` via `logger.app.info(...)`
+  - `📚 OpenAPI docs: http://${host}:${port}/swagger` via `logger.app.info(...)`
+
+### 8. Logging (`utils/logger.ts`)
+
+- Single shared `logger` object built from `winston` + `winston-daily-rotate-file` (deps already pinned in `apps/server/package.json`).
+- Transports:
+  - **`logs/%DATE%.log`** — all levels, JSON, `datePattern: 'YYYY-MM-DD'`, `maxSize: '20m'`, `maxFiles: '7d'`, `zippedArchive: true`. Old `.log` files older than 7 days are auto-deleted.
+  - **`logs/error-%DATE%.log`** — same config but `level: 'error'`, for fast triage of production incidents.
+  - **`Console`** — pretty format for local dev; stdout is captured by Bun / container runtime.
+- Always import the prebuilt categories — never instantiate your own winston logger:
+  ```ts
+  import { logger } from '../utils/logger' // adjust depth
+
+  logger.app.info('server started', { port })
+  logger.auth.warn('login failed', { userName })
+  logger.db.error('query failed', { sql, err })
+  logger.http.info('request', { method, url })
+  logger.bootstrap.info('database ready')
+  logger.queue.info('job enqueued', { job, id })
+  logger.scheduler.info('cron tick', { task })
+  ```
+- The fixed `LogCategory` union is: `'app' | 'auth' | 'db' | 'http' | 'bootstrap' | 'queue' | 'scheduler'`. Add a new one by extending the union in `utils/logger.ts`, not by calling `winston.createLogger` ad-hoc.
+- NEVER use `console.log` / `console.error` in application code — every diagnostic line must go through `logger.<category>` so it lands in the rotating files and the error log. `console.*` is allowed only for the bootstrap-shutdown path before the logger itself is loaded.
+- Level is controlled by `LOG_LEVEL` env var (default `info`); `maxFiles` and `maxSize` are fixed at 7 days / 20m — change them in `utils/logger.ts` if a different retention is needed.
+- When adding new operational events, pick the most specific category and attach structured `meta` (`{ userId, requestId, err }`) — avoid interpolating these into the message string.
 
 ## Workflow when invoked
 
@@ -205,3 +233,5 @@ status: t.Optional(
 - [ ] No `dotenv`, no `ioredis`+`pg`+`ws`/`better-sqlite3`/`express` per AGENTS.md.
 - [ ] Type-only imports use `import type` (matches `verbatimModuleSyntax`).
 - [ ] No stray comments added.
+- [ ] Diagnostics use `logger.<category>` from `utils/logger.ts` — no raw `console.log` / `console.error` in app code.
+- [ ] New categories are added by extending `LogCategory` in `utils/logger.ts`, not by instantiating ad-hoc winston loggers.

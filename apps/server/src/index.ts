@@ -8,6 +8,7 @@ import { user } from './modules/user'
 import { role } from './modules/role'
 import { menu } from './modules/menu'
 import { HttpError } from './utils/error'
+import { logger } from './utils/logger'
 import { ApiCode, ok } from './utils/response'
 
 const app = new Elysia({ name: 'app' })
@@ -37,8 +38,15 @@ const app = new Elysia({ name: 'app' })
       allowedHeaders: ['Content-Type', 'Authorization']
     })
   )
+  .onRequest(({ request }) => {
+    logger.http.info('request', {
+      method: request.method,
+      url: request.url
+    })
+  })
   .onError(({ code, error, set }) => {
     if (code === 'VALIDATION') {
+      logger.app.warn('validation failed', { detail: error.all ?? error.message })
       set.status = 200
       return {
         code: ApiCode.error,
@@ -48,13 +56,18 @@ const app = new Elysia({ name: 'app' })
     }
     if (error instanceof HttpError) {
       if (error.httpStatus !== 200) set.status = error.httpStatus
+      logger.app.warn('http error', {
+        code: error.code,
+        httpStatus: error.httpStatus,
+        message: error.message
+      })
       return {
         code: error.code,
         msg: error.message,
         data: null
       }
     }
-    console.error('[Server Error]', error)
+    logger.app.error('server error', { err: error })
     set.status = 200
     const fallbackMessage =
       error instanceof Error ? error.message : '服务器内部错误'
@@ -74,17 +87,17 @@ const app = new Elysia({ name: 'app' })
 const start = async () => {
   try {
     await bootstrap()
-    console.log('[bootstrap] database ready')
+    logger.bootstrap.info('database ready')
   } catch (err) {
-    console.error('[bootstrap] failed', err)
+    logger.bootstrap.error('bootstrap failed', { err })
     process.exit(1)
   }
 
   app.listen(config.port)
-  console.log(
-    `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
-  )
-  console.log(`📚 OpenAPI docs: http://${app.server?.hostname}:${app.server?.port}/swagger`)
+  const host = app.server?.hostname
+  const port = app.server?.port
+  logger.app.info(`Elysia is running at ${host}:${port}`)
+  logger.app.info(`OpenAPI docs: http://${host}:${port}/swagger`)
 }
 
 start()
